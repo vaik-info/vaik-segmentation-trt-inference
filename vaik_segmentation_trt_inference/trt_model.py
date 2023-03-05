@@ -49,10 +49,10 @@ class TrtModel:
                 self.outputs.append(binding)
 
     def inference(self, input_image_list: List[np.ndarray]) -> Tuple[List[Dict], np.ndarray]:
-        resized_image_array = self.__preprocess_image_list(input_image_list,
+        resized_image_array, resize_image_shape_list, input_image_shape_list = self.__preprocess_image_list(input_image_list,
                                                            (self.inputs[0]['shape'][1], self.inputs[0]['shape'][2]))
         raw_pred = self.__inference(resized_image_array)
-        output = self.__output_parse(raw_pred)
+        output = self.__output_parse(raw_pred, resize_image_shape_list, input_image_shape_list)
         return output, raw_pred
 
     def __inference(self, resize_input_tensor: np.ndarray) -> np.ndarray:
@@ -83,17 +83,17 @@ class TrtModel:
         return self.outputs[0]["shape"], self.outputs[0]["dtype"]
 
     def __preprocess_image_list(self, input_image_list: List[np.ndarray],
-                                resize_input_shape: Tuple[int, int]) -> np.ndarray:
-        resized_image_list = []
-        resized_scales_list = []
+                                resize_input_shape: Tuple[int, int]) -> Tuple[np.ndarray, List[Tuple], List[Tuple]]:
+        resized_image_list, resize_image_shape_list, input_image_shape_list = [], [], []
         for input_image in input_image_list:
-            resized_image, resized_scales = self.__preprocess_image(input_image, resize_input_shape)
+            resized_image, resize_image_shape, input_image_shape = self.__preprocess_image(input_image, resize_input_shape)
             resized_image_list.append(resized_image)
-            resized_scales_list.append(resized_scales)
-        return np.stack(resized_image_list)
+            resize_image_shape_list.append(resize_image_shape)
+            input_image_shape_list.append(input_image_shape)
+        return np.stack(resized_image_list), resize_image_shape_list, input_image_shape_list
 
     def __preprocess_image(self, input_image: np.ndarray, resize_input_shape: Tuple[int, int]) -> Tuple[
-        np.ndarray, Tuple[float, float]]:
+        np.ndarray, Tuple[int, int], Tuple[int, int]]:
         if len(input_image.shape) != 3:
             raise ValueError('dimension mismatch')
         if not np.issubdtype(input_image.dtype, np.uint8):
@@ -101,8 +101,6 @@ class TrtModel:
 
         output_image = np.zeros((*resize_input_shape, input_image.shape[2]),
                                 dtype=input_image.dtype)
-        resized_scale = min(resize_input_shape[1] / input_image.shape[1],
-                            resize_input_shape[0] / input_image.shape[0])
         pil_image = Image.fromarray(input_image)
         x_ratio, y_ratio = resize_input_shape[1] / pil_image.width, resize_input_shape[0] / pil_image.height
         if x_ratio < y_ratio:
@@ -112,11 +110,16 @@ class TrtModel:
         resize_pil_image = pil_image.resize(resize_size)
         resize_image = np.array(resize_pil_image)
         output_image[:resize_image.shape[0], :resize_image.shape[1], :] = resize_image
-        return output_image, (resize_input_shape[1] / resized_scale, resize_input_shape[0] / resized_scale)
+        return output_image, resize_image.shape, input_image.shape
 
-    def __output_parse(self, pred: np.ndarray) -> List[Dict]:
+    def __output_parse(self, pred: np.ndarray, resize_image_shape_list: List[Tuple], input_image_shape_list: List[Tuple]) -> List[Dict]:
         output_dict_list = []
         for index in range(pred.shape[0]):
-            output_dict = {'labels': np.argmax(pred[index], -1)}
+            arg_max_pred = np.argmax(pred[index], -1)
+            arg_max_pred = arg_max_pred[:resize_image_shape_list[index][0], :resize_image_shape_list[index][1]]
+            arg_max_pred_image = Image.fromarray(arg_max_pred.astype(np.uint8))
+            arg_max_pred_image = arg_max_pred_image.resize((input_image_shape_list[index][1], input_image_shape_list[index][0]), resample=Image.NEAREST)
+            arg_max_array = np.asarray(arg_max_pred_image)
+            output_dict = {'labels': arg_max_array}
             output_dict_list.append(output_dict)
         return output_dict_list
