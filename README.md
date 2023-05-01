@@ -6,7 +6,7 @@ Inference by segmentation Tensor RT model
 ## Install
 
 ``` shell
-pip install git+https://github.com/vaik-info/vaik-rainbow-text-gif-generator
+pip install git+https://github.com/vaik-info/vaik-segmentation-trt-inference
 ```
 
 ## Usage
